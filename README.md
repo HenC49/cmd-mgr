@@ -35,12 +35,28 @@
 
 ## 安装
 
+**一键安装（macOS / Linux）**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HenC49/cmd-mgr/main/scripts/install.sh | bash
+```
+
+脚本自动识别系统与架构，从 GitHub Releases 下载对应二进制并校验 sha256，安装到 `/usr/local/bin`（不可写且无 sudo 时退回 `~/.local/bin` 并写入 PATH），最后自动安装 shell 集成。可选环境变量：`CM_VERSION=v0.2.0` 指定版本、`CM_INSTALL_DIR=<目录>` 指定安装位置、`CM_SKIP_INTEGRATE=1` 跳过集成。
+
+**Windows（PowerShell）**
+
+```powershell
+irm https://raw.githubusercontent.com/HenC49/cmd-mgr/main/scripts/install.ps1 | iex
+```
+
+安装到 `%LOCALAPPDATA%\Programs\cm` 并自动加入用户 PATH。也可从 [Releases](https://github.com/HenC49/cmd-mgr/releases) 手动下载 zip 解压。
+
+**源码安装**
+
 ```bash
 make            # 编译出 ./cm
 make install    # 安装到 /usr/local/bin，并自动把 shell 集成写入 ~/.zshrc / ~/.bashrc（幂等）
 make integrate  # 仅安装 shell 集成（install 已自动执行）
-# 或交叉编译
-make build-linux build-windows   # 产物在 dist/
 ```
 
 `make install` 的集成步骤会自动检测 shell（zsh → `~/.zshrc`，bash → `~/.bashrc`），在 rc 末尾追加：
@@ -126,6 +142,7 @@ eval "$(cm init zsh)"
 make test    # 单元测试（model/store/discover/ui/picker）
 make vet     # go vet
 make build-all   # mac + linux(amd64/arm64) + windows(amd64/arm64)
+make release     # 全平台编译并打包 dist/（tar.gz / zip / checksums.txt），用于上传 GitHub Release
 ```
 
 目录结构：

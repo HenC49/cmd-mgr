@@ -1,9 +1,9 @@
 // Package form 提供新增/编辑别名的交互表单 TUI：
 // 命令（PATH 实时补全与校验）→ 别名 → 描述 → 标签。
 //
-//	enter      下一项；最后一项（标签）上为保存
-//	↑/↓ tab    切换字段；shift+tab 上一项
-//	tab        在命令项上可补全首个建议（如输入 rsyn + tab → rsync）
+//	enter      下一项；最后一项（标签）上为保存（不触发补全）
+//	↑/↓        切换字段（不触发补全）；shift+tab 上一项
+//	tab        在命令项上补全首个建议（如输入 rsyn + tab → rsync），无可补全时切换字段
 //	esc/ctrl+c 取消
 package form
 
@@ -133,7 +133,14 @@ func (f formTui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			f.outcome = OutcomeCancelled
 			return f, tea.Quit
 
-		case tea.KeyDown, tea.KeyTab:
+		case tea.KeyTab:
+			// 补全仅由 tab 触发：命中建议时消费按键，停留在命令项
+			if f.focus == fieldCommand && f.completeCommand() {
+				return f, nil
+			}
+			f.nextField()
+			return f, nil
+		case tea.KeyDown:
 			f.nextField()
 			return f, nil
 		case tea.KeyUp, tea.KeyShiftTab:
@@ -166,13 +173,9 @@ func (f formTui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return f, nil
 }
 
-// nextField 移到下一字段；在命令字段上若有可用补全则先补全。
+// nextField 移到下一字段，不做补全——补全只由 tab 显式触发，
+// enter/↓ 切换时误改命令首词会静默产生错误命令。
 func (f *formTui) nextField() {
-	if f.focus == fieldCommand {
-		if done := f.completeCommand(); done {
-			return
-		}
-	}
 	f.focus = (f.focus + 1) % fieldCount
 	f.syncFocus()
 }
@@ -259,7 +262,7 @@ func (f formTui) View() string {
 	} else {
 		lines = append(lines, "")
 	}
-	lines = append(lines, ui.DimStyle.Render("enter 下一项/保存 · tab 补全或切换 · shift+tab 上一项 · esc 取消"))
+	lines = append(lines, ui.DimStyle.Render("enter 下一项/保存 · ↑/↓ 切换字段 · tab 补全（仅命令项）或下一项 · esc 取消"))
 
 	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	box := ui.BorderStyle.Padding(1, 2).Width(formBoxWidth(f.w))

@@ -17,7 +17,7 @@ import (
 	"cmd-mgr/internal/ui"
 )
 
-var version = "0.1.0"
+var version = "0.2.0"
 
 // ExitError 携带被执命令的退出码，由 main 转为 cm 自身的进程退出码。
 type ExitError struct{ Code int }
