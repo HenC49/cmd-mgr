@@ -1,0 +1,9 @@
+# 二进制与发布产物
+/cm
+/dist/
+
+# Go
+*.test
+*.out
+.zcode
+.idea
