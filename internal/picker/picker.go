@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sahilm/fuzzy"
 
+	"cmd-mgr/internal/history"
 	"cmd-mgr/internal/model"
 	"cmd-mgr/internal/ui"
 )
@@ -42,6 +43,11 @@ type Result struct {
 	Alias  *model.Alias // Execute/Edit/Delete 的目标
 }
 
+// RecentProvider 提供别名最近执行记录（预览面板展示），可为 nil。
+type RecentProvider interface {
+	Recent(alias string, n int) []history.Record
+}
+
 type visItem struct {
 	a       *model.Alias
 	matched []int // 别名中命中的字符下标（用于高亮）
@@ -54,15 +60,16 @@ type tui struct {
 	cursor int
 	offset int // 列表滚动窗口起点
 	w, h   int
+	recent RecentProvider // 执行历史（预览面板），可为 nil
 
 	confirm bool // 删除确认中
 	result  Result
 }
 
 // Run 启动选择 TUI。items 需已按使用频率排序；output 为 nil 时渲染到 stdout
-// （--pick 模式传入 stderr，把 stdout 留给选中结果）。
-func Run(items []*model.Alias, output io.Writer) (Result, error) {
-	t := newTui(items)
+// （--pick 模式传入 stderr，把 stdout 留给选中结果）；recent 提供执行历史，可为 nil。
+func Run(items []*model.Alias, output io.Writer, recent RecentProvider) (Result, error) {
+	t := newTui(items, recent)
 	opts := []tea.ProgramOption{tea.WithAltScreen()}
 	if output != nil {
 		opts = append(opts, tea.WithOutput(output))
@@ -75,12 +82,12 @@ func Run(items []*model.Alias, output io.Writer) (Result, error) {
 	return out.(tui).result, nil
 }
 
-func newTui(items []*model.Alias) tui {
+func newTui(items []*model.Alias, recent RecentProvider) tui {
 	q := textinput.New()
 	q.Prompt = ""
 	q.Placeholder = "输入关键词过滤（别名 / 命令 / 描述 / 标签）…"
 	q.Focus()
-	t := tui{items: items, query: q}
+	t := tui{items: items, query: q, recent: recent}
 	t.applyFilter()
 	return t
 }
@@ -390,6 +397,9 @@ func (t tui) renderPreview(a *model.Alias, width, height int) string {
 		blocks = append(blocks, ui.TagStyle.Render("#"+strings.Join(a.Tags, "  #")))
 	}
 	blocks = append(blocks, ui.DimStyle.Render(fmt.Sprintf("使用 %d 次 · %s", a.UsedCount, ui.TimeAgo(a.LastUsedAt))))
+	if hist := t.renderRecent(a, inner); hist != "" {
+		blocks = append(blocks, hist)
+	}
 
 	body := lipgloss.JoinVertical(lipgloss.Left, blocks...)
 	// 按行截断到预览区高度，避免撑破布局
@@ -398,6 +408,24 @@ func (t tui) renderPreview(a *model.Alias, width, height int) string {
 		lines = lines[:height]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// renderRecent 渲染预览面板中的"最近执行"块（最多 3 条），
+// 供查看上次执行的实际命令与结果、复制参数；无历史时返回空串。
+func (t tui) renderRecent(a *model.Alias, inner int) string {
+	if t.recent == nil {
+		return ""
+	}
+	recs := t.recent.Recent(a.Alias, 3)
+	if len(recs) == 0 {
+		return ""
+	}
+	lines := []string{ui.DimStyle.Render("最近执行:")}
+	for _, r := range recs {
+		head := ui.ExitStatus(r.ExitCode) + " " + ui.DimStyle.Render(ui.PadRight(ui.TimeAgo(r.StartedAt), 9)) + " "
+		lines = append(lines, head+ui.Truncate(r.Command, inner-ui.Width(head)))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
 func clamp(v, lo, hi int) int {

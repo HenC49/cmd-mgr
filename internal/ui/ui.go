@@ -160,3 +160,30 @@ func TimeAgo(t time.Time) string {
 		return t.Format("2006-01-02")
 	}
 }
+
+// DurationStr 把毫秒数渲染为简短时长（如 320ms、1.4s、2m5s）；非正值返回空串。
+func DurationStr(ms int64) string {
+	d := time.Duration(ms) * time.Millisecond
+	switch {
+	case ms <= 0:
+		return ""
+	case d < time.Second:
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	case d < time.Minute:
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	default:
+		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+}
+
+// ExitStatus 渲染一次执行的状态：✓ 成功、✗ 退出码、· 结果未知（shell eval 模式）。
+func ExitStatus(code *int) string {
+	switch {
+	case code == nil:
+		return DimStyle.Render("·")
+	case *code == 0:
+		return OKStyle.Render("✓")
+	default:
+		return ErrorStyle.Render(fmt.Sprintf("✗%d", *code))
+	}
+}

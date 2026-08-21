@@ -26,7 +26,13 @@ var addCmd = &cobra.Command{
   cm add -- docker ps -a          # 预填命令后进入表单
 
 非交互模式（脚本友好）:
-  cm add -a dsync -d "同步源码" -t "deploy,rsync" -- rsync -avz ./ host:/srv/`,
+  cm add -a dsync -d "同步源码" -t "deploy,rsync" -- rsync -avz ./ host:/srv/
+
+命令参数（{{占位符}}）:
+  命令中把需要执行时才确定的值写成 {{参数名}}，可附带说明 {{参数名:说明}}，如:
+    cm add -a sshsrv -- 'ssh {{user:登录用户名}}@{{host:服务器 IP}}'
+  执行该别名时 cm 会弹出参数表单（预填上次值，tab 可复制历史参数），
+  说明展示在对应输入框下方，填完即运行。同名占位符只填一次。`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runAdd(cmd, args)

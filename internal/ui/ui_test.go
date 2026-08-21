@@ -63,3 +63,32 @@ func TestTimeAgo(t *testing.T) {
 		t.Errorf("TimeAgo = %q", got)
 	}
 }
+
+func TestDurationStr(t *testing.T) {
+	cases := map[int64]string{
+		0:     "",
+		-5:    "",
+		320:   "320ms",
+		1400:  "1.4s",
+		65000: "1m5s",
+	}
+	for ms, want := range cases {
+		if got := DurationStr(ms); got != want {
+			t.Errorf("DurationStr(%d) = %q, 期望 %q", ms, got, want)
+		}
+	}
+}
+
+func TestExitStatus(t *testing.T) {
+	if got := ExitStatus(nil); got != DimStyle.Render("·") {
+		t.Errorf("未知状态 = %q", got)
+	}
+	zero := 0
+	if got := ExitStatus(&zero); got != OKStyle.Render("✓") {
+		t.Errorf("成功状态 = %q", got)
+	}
+	three := 3
+	if got := ExitStatus(&three); got != ErrorStyle.Render("✗3") {
+		t.Errorf("失败状态 = %q", got)
+	}
+}

@@ -1,11 +1,15 @@
 BIN := cm
 MODULE := cmd-mgr
-VERSION ?= 0.2.0
 DIST := dist
 
-LDFLAGS := -s -w -X cmd-mgr/internal/cmd.version=$(VERSION)
+# 版本号唯一来源是 internal/version/version.go 的 Version 常量——升版本只改
+# 那一处；此处用 awk 反读（可用环境变量 VERSION 覆盖）。
+VERSION ?= $(shell awk -F'"' '/^const Version/{print $$2}' internal/version/version.go)
 
-.PHONY: build build-macos build-linux build-windows build-all release test vet install integrate clean
+# 版本已在源码常量中，无需 ldflags 注入
+LDFLAGS := -s -w
+
+.PHONY: build build-macos build-linux build-windows build-all release tag test vet install integrate clean
 
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) .
@@ -37,6 +41,10 @@ release: build-macos build-linux build-windows
 
 test:
 	go test ./...
+
+# 按当前版本号打 git tag（如 v0.3.0），安装脚本按 tag 下载 Release 产物
+tag:
+	git tag "v$(VERSION)"
 
 vet:
 	go vet ./...

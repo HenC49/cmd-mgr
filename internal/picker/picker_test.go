@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"cmd-mgr/internal/history"
 	"cmd-mgr/internal/model"
 	"cmd-mgr/internal/ui"
 )
@@ -20,6 +21,13 @@ func testItems() []*model.Alias {
 	}
 }
 
+// fakeRecent 固定返回构造好的记录，验证预览面板的历史块。
+type fakeRecent struct{ recs map[string][]history.Record }
+
+func (f fakeRecent) Recent(alias string, n int) []history.Record {
+	return f.recs[alias]
+}
+
 func resize(t *testing.T, m tui, w, h int) tui {
 	t.Helper()
 	upd, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
@@ -27,7 +35,7 @@ func resize(t *testing.T, m tui, w, h int) tui {
 }
 
 func TestViewLayoutExactWidth(t *testing.T) {
-	m := resize(t, newTui(testItems()), 120, 30)
+	m := resize(t, newTui(testItems(), nil), 120, 30)
 	view := m.View()
 	for i, line := range strings.Split(view, "\n") {
 		if w := ui.Width(line); w != 120 {
@@ -47,7 +55,7 @@ func TestViewLayoutExactWidth(t *testing.T) {
 }
 
 func TestViewNarrowLayout(t *testing.T) {
-	m := resize(t, newTui(testItems()), 60, 20)
+	m := resize(t, newTui(testItems(), nil), 60, 20)
 	view := m.View()
 	for i, line := range strings.Split(view, "\n") {
 		if w := ui.Width(line); w != 60 {
@@ -57,14 +65,34 @@ func TestViewNarrowLayout(t *testing.T) {
 }
 
 func TestViewEmpty(t *testing.T) {
-	m := resize(t, newTui(nil), 100, 24)
+	m := resize(t, newTui(nil, nil), 100, 24)
 	if !strings.Contains(m.View(), "还没有别名") {
 		t.Error("空库应显示引导文案")
 	}
 }
 
+// 预览面板应展示选中别名的最近执行（状态 + 相对时间 + 替换后命令）。
+func TestPreviewShowsRecentHistory(t *testing.T) {
+	code := 3
+	recent := fakeRecent{recs: map[string][]history.Record{
+		"dsync": {
+			{Alias: "dsync", Command: "rsync -avz ./src/ 10.0.0.2:/srv/app/", ExitCode: nil, StartedAt: time.Now().Add(-time.Hour)},
+			{Alias: "dsync", Command: "rsync -avz ./src/ 10.0.0.1:/srv/app/", ExitCode: &code, StartedAt: time.Now().Add(-26 * time.Hour)},
+		},
+	}}
+	m := resize(t, newTui(testItems(), recent), 120, 30)
+	// 选中 dsync
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("dsync")})
+	view := m.View()
+	for _, want := range []string{"最近执行:", "rsync -avz ./src/ 10.0.0.2", "✗3 1 天前"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("预览面板应包含 %q\n---\n%s", want, view)
+		}
+	}
+}
+
 func TestFilterAndKeys(t *testing.T) {
-	m := newTui(testItems())
+	m := newTui(testItems(), nil)
 	m = resize(t, m, 120, 30)
 
 	// 打字即过滤：输入 rsyn 只剩 dsync
@@ -82,14 +110,14 @@ func TestFilterAndKeys(t *testing.T) {
 	}
 
 	// esc → 退出
-	m2 := newTui(testItems())
+	m2 := newTui(testItems(), nil)
 	upd, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if upd.(tui).result.Action != ActionQuit {
 		t.Error("esc 应退出")
 	}
 
 	// ctrl+d → 确认态，y → 删除动作
-	m3 := resize(t, newTui(testItems()), 120, 30)
+	m3 := resize(t, newTui(testItems(), nil), 120, 30)
 	upd, _ = m3.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
 	m3 = upd.(tui)
 	if !m3.confirm {

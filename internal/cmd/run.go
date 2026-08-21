@@ -2,13 +2,17 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/sahilm/fuzzy"
 	"github.com/spf13/cobra"
 
 	"cmd-mgr/internal/model"
 	"cmd-mgr/internal/runner"
+	"cmd-mgr/internal/ui"
 )
 
 var (
@@ -29,14 +33,32 @@ var runCmd = &cobra.Command{
 		if !ok {
 			return notFoundError(st.List(), name)
 		}
-		_ = st.RecordUse(name)
-		if runPrint {
-			fmt.Println(a.Command)
+		hist := openHistory()
+		// --print 模式下 stdout 被 shell 捕获用于 eval，
+		// 参数表单须渲染到 stderr（同 picker 的 --pick 处理）
+		var out io.Writer
+		if runPrint && !ui.IsTTY(os.Stdout) {
+			out = os.Stderr
+			ui.AdoptStderrColor()
+		}
+		r, confirmed, err := resolveCommand(a, hist, out)
+		if err != nil {
+			return err
+		}
+		if !confirmed {
 			return nil
 		}
-		code := runner.Run(a.Command)
+		_ = st.RecordUse(name)
+		start := time.Now()
+		if runPrint {
+			fmt.Println(r.command)
+			recordHistory(hist, a, r, start, nil) // eval 结果未知
+			return nil
+		}
+		code := runner.Run(r.command)
+		recordHistory(hist, a, r, start, &code)
 		if code == 127 { // command not found
-			printShellFnHint(a.Command)
+			printShellFnHint(r.command)
 		}
 		return &ExitError{Code: code}
 	},

@@ -94,7 +94,7 @@ func newForm(prefill *model.Alias, occupied map[string]bool, isEdit bool) formTu
 	f := formTui{isEdit: isEdit, orig: prefill, occupied: occupied}
 	values := [fieldCount]string{prefill.Command, prefill.Alias, prefill.Description, strings.Join(prefill.Tags, ", ")}
 	placeholders := [fieldCount]string{
-		"如: rsync -avz --delete ./src/ host:/srv/app/",
+		"如: rsync -avz ./src/ {{host}}:/srv/app/（{{名}} 为参数）",
 		"如: dsync",
 		"这条命令是干什么的（搜索时也匹配这里）",
 		"可选，逗号分隔，如: deploy, rsync",
@@ -254,6 +254,7 @@ func (f formTui) View() string {
 				// 与输入框内容对齐（标签 6 列 + "[" 1 列 + 空格 1 列）
 				lines = append(lines, strings.Repeat(" ", fieldLabelW+2)+hint)
 			}
+			lines = append(lines, strings.Repeat(" ", fieldLabelW+2)+f.paramHint())
 		}
 	}
 	lines = append(lines, "")
@@ -278,6 +279,25 @@ func (f formTui) renderField(i int, label string) string {
 		style = ui.AliasStyle
 	}
 	return style.Render(ui.PadRight(label, fieldLabelW)) + "[" + f.inputs[i].View() + "]"
+}
+
+// paramHint 命令项下方的参数提示：命令里已有 {{占位符}} 时列出识别到的
+// 参数（含内联说明）；否则给出占位符写法说明——否则用户不知道命令可以带参数。
+func (f formTui) paramHint() string {
+	if ps := model.ExtractParams(f.inputs[fieldCommand].Value()); len(ps) > 0 {
+		parts := make([]string, len(ps))
+		for i, p := range ps {
+			if p.Desc != "" {
+				parts[i] = p.Name + "（" + p.Desc + "）"
+			} else {
+				parts[i] = p.Name
+			}
+		}
+		return ui.TagStyle.Render("参数: "+strings.Join(parts, ", ")) +
+			ui.DimStyle.Render("（执行时填写，可 tab 复制历史值）")
+	}
+	inner := formBoxWidth(f.w) - 4 - fieldLabelW - 2 // 与输入框内容对齐后的可用宽度
+	return ui.DimStyle.Render(ui.Truncate("支持参数: {{名称:说明}} 执行时填 · 例: ssh {{user}}@{{host}}", inner))
 }
 
 // commandHint 命令首词的 PATH 校验提示与建议列表。

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -15,9 +16,8 @@ import (
 	"cmd-mgr/internal/runner"
 	"cmd-mgr/internal/store"
 	"cmd-mgr/internal/ui"
+	"cmd-mgr/internal/version"
 )
-
-var version = "0.2.0"
 
 // ExitError 携带被执命令的退出码，由 main 转为 cm 自身的进程退出码。
 type ExitError struct{ Code int }
@@ -28,10 +28,10 @@ func (e *ExitError) Error() string { return fmt.Sprintf("命令退出码 %d", e.
 var pickMode bool
 
 var rootCmd = &cobra.Command{
-	Use:     "cm",
-	Short:   "cm - 命令别名管理器，记住那些记不清的命令",
-	Version: version,
-	Args:    cobra.NoArgs,
+	Use:           "cm",
+	Short:         "cm - 命令别名管理器，记住那些记不清的命令",
+	Version:       version.Version,
+	Args:          cobra.NoArgs,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -68,6 +68,7 @@ func runRoot() error {
 	if err != nil {
 		return err
 	}
+	hist := openHistory()
 	for {
 		items := st.List()
 		// --pick 模式下 TUI 渲染到 stderr，把 stdout 留给选中的命令；
@@ -77,7 +78,7 @@ func runRoot() error {
 			out = os.Stderr
 			ui.AdoptStderrColor()
 		}
-		res, err := picker.Run(items, out)
+		res, err := picker.Run(items, out, hist)
 		if err != nil {
 			return err
 		}
@@ -85,14 +86,25 @@ func runRoot() error {
 		case picker.ActionQuit:
 			return nil
 		case picker.ActionExecute:
+			// 有 {{占位符}} 的命令先填参数；取消则回到选择器
+			r, confirmed, err := resolveCommand(res.Alias, hist, out)
+			if err != nil {
+				return err
+			}
+			if !confirmed {
+				continue
+			}
 			_ = st.RecordUse(res.Alias.Alias) // 统计失败不阻塞执行
+			start := time.Now()
 			if pickMode {
-				fmt.Println(res.Alias.Command)
+				fmt.Println(r.command)
+				recordHistory(hist, res.Alias, r, start, nil) // eval 结果未知
 				return nil
 			}
-			code := runner.Run(res.Alias.Command)
+			code := runner.Run(r.command)
+			recordHistory(hist, res.Alias, r, start, &code)
 			if code == 127 { // command not found
-				printShellFnHint(res.Alias.Command)
+				printShellFnHint(r.command)
 			}
 			return &ExitError{Code: code}
 		case picker.ActionAdd:

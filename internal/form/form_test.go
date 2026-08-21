@@ -111,3 +111,30 @@ func TestFormPrefilledLongCommand(t *testing.T) {
 		}
 	}
 }
+
+// TestFormParamHint 命令项下方常驻参数提示：无占位符时展示写法说明，
+// 有占位符时列出识别到的参数名（去重）。
+func TestFormParamHint(t *testing.T) {
+	f := newForm(nil, map[string]bool{}, false)
+	// 空命令：展示占位符写法（可发现性——用户不知道命令能带参数）
+	view := f.View()
+	if !strings.Contains(view, "{{名称:说明}}") || !strings.Contains(view, "支持参数") {
+		t.Errorf("无占位符时应展示参数写法说明:\n%s", view)
+	}
+
+	// 识别到占位符：切换为参数列表（带内联说明）
+	f.inputs[fieldCommand].SetValue("ssh {{user:用户名}}@{{host}}")
+	view = f.View()
+	if !strings.Contains(view, "参数: user（用户名）, host") {
+		t.Errorf("应提示识别到的参数及说明:\n%s", view)
+	}
+	if strings.Contains(view, "支持参数") {
+		t.Error("已有占位符时不应再显示写法说明")
+	}
+
+	// 同名占位符去重
+	f.inputs[fieldCommand].SetValue("cp {{f}} {{f}}.bak")
+	if !strings.Contains(f.View(), "参数: f") {
+		t.Error("重复占位符应去重展示")
+	}
+}

@@ -33,6 +33,9 @@ func (a *Alias) Validate() error {
 	if a.Command == "" {
 		return fmt.Errorf("命令不能为空")
 	}
+	if err := validatePlaceholders(a.Command); err != nil {
+		return err
+	}
 	return nil
 }
 

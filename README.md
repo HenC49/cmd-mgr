@@ -29,6 +29,8 @@
 |---|---|
 | 输入命令设置别名 + 描述 | `cm add` 交互表单（命令/别名/描述/标签），或非交互 `cm add -a xx -d "描述" -- <命令>` |
 | 交互模式选择命令 | 裸 `cm` 打开 TUI：打字即模糊过滤（匹配别名/命令/描述/标签），回车执行 |
+| 命令参数占位符 | 命令中写 `{{参数名}}`（如 `ssh {{user}}@{{host}}`），执行时 TUI 填参数值后运行，实时预览替换结果 |
+| 执行历史 | 每次执行记录替换后命令、参数值、退出码与耗时；参数表单**预填上次值**、**tab 一键复制历史参数**，预览面板展示最近执行，`cm history` 查看全部 |
 | 别名持久化 | JSON 存储，原子写盘；按使用频率自动排序，常用命令浮顶 |
 | 统一命令列出可选项 | `cm`（TUI 双栏：列表 + 命令预览）/ `cm list`（表格）/ `cm search <词>` |
 | 自动列出可用命令 | `cm add` 时实时从 PATH 补全命令名（tab 补全）并校验；`cm browse` TUI 浏览 PATH 全部可执行命令，选中可直接建别名 |
@@ -41,7 +43,7 @@
 curl -fsSL https://raw.githubusercontent.com/HenC49/cmd-mgr/main/scripts/install.sh | bash
 ```
 
-脚本自动识别系统与架构，从 GitHub Releases 下载对应二进制并校验 sha256，安装到 `/usr/local/bin`（不可写且无 sudo 时退回 `~/.local/bin` 并写入 PATH），最后自动安装 shell 集成。可选环境变量：`CM_VERSION=v0.2.0` 指定版本、`CM_INSTALL_DIR=<目录>` 指定安装位置、`CM_SKIP_INTEGRATE=1` 跳过集成。
+脚本自动识别系统与架构，从 GitHub Releases 下载对应二进制并校验 sha256，安装到 `/usr/local/bin`（不可写且无 sudo 时退回 `~/.local/bin` 并写入 PATH），最后自动安装 shell 集成。可选环境变量：`CM_VERSION=v0.3.0` 指定版本、`CM_INSTALL_DIR=<目录>` 指定安装位置、`CM_SKIP_INTEGRATE=1` 跳过集成。
 
 **Windows（PowerShell）**
 
@@ -74,20 +76,54 @@ eval "$(cm init zsh)"
 # 1. 添加别名（交互表单）
 cm add
 
-# 2. 非交互添加
-cm add -a dsync -d "同步源码到服务器" -t "deploy,rsync" -- rsync -avz --delete ./src/ host:/srv/app/
+# 2. 非交互添加（支持 {{参数}} 占位符，执行时再填写）
+cm add -a dsync -d "同步源码到服务器" -t "deploy,rsync" -- rsync -avz --delete ./src/ {{host}}:/srv/app/
 
 # 3. 使用：裸 cm 打开选择器，打字过滤，回车执行
-cm
+cm    # 选中含 {{参数}} 的命令会先弹参数表单（预填上次值），确认后运行
 
 # 4. 其他入口
 cm list            # 表格列出全部
 cm search docker   # 模糊搜索
-cm run dsync       # 跳过 TUI 直接执行
+cm run dsync       # 跳过 TUI 直接执行（含参数时同样先填参数）
+cm history         # 查看执行历史（替换后命令 + 结果）；cm history dsync 看单个别名
 cm edit dsync      # 编辑
 cm rm dsync        # 删除（-f 跳过确认；-i 多选删除）
 cm browse          # 浏览 PATH 中所有可用命令
 ```
+
+## 命令参数（{{占位符}}）
+
+命令里用 `{{参数名}}` 留出参数位，执行时 cm 弹出参数表单，填完即运行：
+
+```
+ cm · 执行 dsync
+ $ rsync -avz ./src/ {{host}}:/srv/app/
+
+ host  [10.0.0.2]
+
+ 运行命令:
+ ╭────────────────────────────────────╮
+ │ $ rsync -avz ./src/ 10.0.0.2:/srv/app/ │
+ ╰────────────────────────────────────╯
+
+ 最近执行（tab 填入）:
+   ▸ 2 小时前 ✓ 3.2s  rsync -avz ./src/ 10.0.0.2:/srv/app/
+     3 天前   ✗       rsync -avz ./src/ 10.0.0.1:/srv/app/
+```
+
+- 同名占位符只填一次；`cm add` / `cm edit` 会在命令下方实时提示识别到的参数名；
+- 参数可附带说明，写在占位符里：`{{host:服务器 IP}}`——说明展示在执行表单的输入框下方，
+  忘了参数含义时不用翻文档；`cm add` / `cm edit` 识别到时会列出 `host（服务器 IP）`；
+- 表单**预填最近一次的参数值**——重复上次执行连按 enter 即可；
+- **tab 在历史记录间循环**，把选中那次的全部参数一键填入（复制前序参数的主要路径）；
+- `cm run <别名>` 与 shell 集成模式（`--pick` / `--print`）同样支持：填完参数后由当前 shell 执行；
+- 非交互场景（脚本/管道）执行含参数命令会明确报错。
+
+**参数表单是内联渲染的（fzf 风格），不会覆盖终端**：选中命令后主选择器退出、
+终端还原为你之前的内容（上一个非 cm 命令及其输出仍然可见），参数表单只在底部
+光标处渲染一个小框。要引用上面输出里的值（如刚查到的 pod 名、IP）：用鼠标选中
+复制，直接按终端粘贴键（macOS `⌘V` / Linux `Ctrl+Shift+V`）填入输入框即可。
 
 ## shell 集成（推荐：支持 cd / export / shell 函数）
 
@@ -118,28 +154,40 @@ eval "$(cm init zsh)"
 
 | 平台 | 路径 |
 |---|---|
-| macOS | `~/Library/Application Support/cmd-mgr/aliases.json` |
-| Linux | `~/.config/cmd-mgr/aliases.json` |
-| Windows | `%AppData%\cmd-mgr\aliases.json` |
+| macOS | `~/Library/Application Support/cmd-mgr/aliases.json`、`history.json` |
+| Linux | `~/.config/cmd-mgr/aliases.json`、`history.json` |
+| Windows | `%AppData%\cmd-mgr\aliases.json`、`history.json` |
 
-设置 `CM_HOME` 环境变量可覆盖目录（测试/便携场景）。文件为可读 JSON，也可手工编辑（写入采用临时文件 + rename 原子替换）。
+设置 `CM_HOME` 环境变量可覆盖目录（测试/便携场景）。文件为可读 JSON，也可手工编辑（写入采用临时文件 + rename 原子替换）。执行历史上限 500 条，自动淘汰最旧；shell 集成（eval）模式下无法得知命令结果，记录以 "·" 标示未知。
 
 ## TUI 按键
+
+主选择器：
 
 | 按键 | 作用 |
 |---|---|
 | 直接打字 | 模糊过滤（查询为空时 `j`/`k` 可上下移动） |
 | `↑` `↓` / `ctrl+k` `ctrl+j` | 移动光标（`PgUp`/`PgDown`/`Home`/`End` 亦可） |
-| `enter` | 执行选中项（退出码透传） |
+| `enter` | 执行选中项（含 `{{参数}}` 时先填参数；退出码透传） |
 | `ctrl+n` | 新增别名（保存后回到选择器） |
 | `ctrl+e` | 编辑选中项 |
 | `ctrl+d` | 删除选中项（`y` 确认） |
 | `esc` / `ctrl+c` | 退出 |
 
+参数表单（命令含 `{{占位符}}` 时出现）：
+
+| 按键 | 作用 |
+|---|---|
+| 直接打字 | 填写当前参数（默认预填上次值；粘贴键可直接粘贴终端里复制的值） |
+| `enter` | 下一项；最后一项上为确认运行 |
+| `↑` `↓` / `shift+tab` | 切换参数项 |
+| `tab` | （有历史时优先）循环选择历史记录，一键填入该次全部参数 |
+| `esc` / `ctrl+c` | 取消，回到选择器 |
+
 ## 开发
 
 ```bash
-make test    # 单元测试（model/store/discover/ui/picker）
+make test    # 单元测试（model/store/history/prompt/discover/ui/picker/form 等）
 make vet     # go vet
 make build-all   # mac + linux(amd64/arm64) + windows(amd64/arm64)
 make release     # 全平台编译并打包 dist/（tar.gz / zip / checksums.txt），用于上传 GitHub Release
@@ -149,17 +197,23 @@ make release     # 全平台编译并打包 dist/（tar.gz / zip / checksums.txt
 
 ```
 internal/
-├── cmd/        # cobra 子命令：root(picker)/add/list/rm/edit/run/search/browse/init
-├── model/      # Alias 数据模型、校验、按使用排序
-├── store/      # JSON 持久化（原子写）、CRUD、使用统计
+├── cmd/        # cobra 子命令：root(picker)/add/list/rm/edit/run/search/browse/history/init
+├── model/      # Alias 数据模型、校验、{{占位符}} 解析、按使用排序
+├── store/      # 别名 JSON 持久化（原子写）、CRUD、使用统计
+├── history/    # 执行历史持久化（替换后命令、参数值、退出码、耗时）
 ├── platform/   # 平台差异收敛：配置目录、默认 shell
-├── picker/     # 主选择 TUI（即时过滤 + 双栏预览）
-├── form/       # 新增/编辑表单 TUI（PATH 补全）
+├── version/    # 版本号唯一定义处（Makefile 从这里反读）
+├── picker/     # 主选择 TUI（即时过滤 + 双栏预览 + 最近执行）
+├── form/       # 新增/编辑表单 TUI（PATH 补全、参数提示）
+├── prompt/     # 执行前参数填写 TUI（预填历史值、tab 复制历史参数）
 ├── browse/     # PATH 命令浏览 TUI
 ├── discover/   # $PATH 扫描
 ├── runner/     # 命令执行（shell 选择、退出码透传）
 └── ui/         # 共享样式与文本工具（宽度感知截断/换行）
 ```
+
+升版本只改一处：`internal/version/version.go` 的 `Version` 常量（`cm --version`、
+`make release` 的产物命名都会跟着变），随后打对应 git tag 并上传 GitHub Release。
 
 ## Windows / Linux 预留说明
 
