@@ -214,3 +214,64 @@ func TestParamDescShown(t *testing.T) {
 		t.Errorf("无说明不应渲染说明行:\n%s", view)
 	}
 }
+
+// secretCfg 混合参数与密钥引用的表单配置。
+func secretCfg() Config {
+	return Config{
+		Alias:    "db",
+		Template: "mysql -u {{user@mydb}} -p{{pass@mydb:数据库密码}} -h {{host}}",
+		Params: []model.Param{
+			{Name: "user@mydb", Secret: true},
+			{Name: "pass@mydb", Desc: "数据库密码", Secret: true},
+			{Name: "host"},
+		},
+	}
+}
+
+// 密钥引用不出现输入框：只有普通参数可输入，密钥以只读行展示来源。
+func TestSecretRefsNoInput(t *testing.T) {
+	m := newTui(secretCfg())
+	if len(m.inputs) != 1 {
+		t.Fatalf("只有 host 应有输入框，实际 %d 个", len(m.inputs))
+	}
+	// values 只含手填参数
+	m = pressRune(t, m, "10.0.0.1")
+	m = press(t, m, tea.KeyEnter) // 唯一输入项，enter 直接确认
+	if !m.result.Confirm {
+		t.Fatal("最后一个输入项 enter 应确认")
+	}
+	if len(m.result.Values) != 1 || m.result.Values["host"] != "10.0.0.1" {
+		t.Fatalf("Values 应只含 host: %v", m.result.Values)
+	}
+}
+
+// 密钥引用行展示读取来源，预览中的密钥值脱敏。
+func TestSecretRowAndMaskedPreview(t *testing.T) {
+	m := resize(t, newTui(secretCfg()), 100, 30)
+	view := m.View()
+	for _, want := range []string{
+		"user@mydb",
+		"pass@mydb",
+		"系统密码管理器读取 mydb 的账号",
+		"系统密码管理器读取 mydb 的密码",
+		"数据库密码",                  // 密钥引用的说明
+		model.SecretMask + " -h", // 预览脱敏后跟命令其余部分
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("视图中应包含 %q\n---\n%s", want, view)
+		}
+	}
+	// 纯密钥命令（无输入项）：enter 直接确认，方向键不 panic
+	only := Config{Alias: "p", Template: "curl -u {{user@api}}:{{pass@api}} https://x",
+		Params: []model.Param{{Name: "user@api", Secret: true}, {Name: "pass@api", Secret: true}}}
+	m2 := newTui(only)
+	if len(m2.inputs) != 0 {
+		t.Fatalf("纯密钥命令不应有输入框，实际 %d 个", len(m2.inputs))
+	}
+	m2 = press(t, m2, tea.KeyUp)
+	m2 = press(t, m2, tea.KeyTab)
+	m2 = press(t, m2, tea.KeyEnter)
+	if !m2.result.Confirm {
+		t.Fatal("纯密钥命令 enter 应直接确认运行")
+	}
+}

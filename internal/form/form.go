@@ -94,7 +94,7 @@ func newForm(prefill *model.Alias, occupied map[string]bool, isEdit bool) formTu
 	f := formTui{isEdit: isEdit, orig: prefill, occupied: occupied}
 	values := [fieldCount]string{prefill.Command, prefill.Alias, prefill.Description, strings.Join(prefill.Tags, ", ")}
 	placeholders := [fieldCount]string{
-		"如: rsync -avz ./src/ {{host}}:/srv/app/（{{名}} 为参数）",
+		"如: rsync -avz ./src/ {{host}}:/srv/app/（{{名}} 参数 · {{pass@服务}} 取密码）",
 		"如: dsync",
 		"这条命令是干什么的（搜索时也匹配这里）",
 		"可选，逗号分隔，如: deploy, rsync",
@@ -282,22 +282,36 @@ func (f formTui) renderField(i int, label string) string {
 }
 
 // paramHint 命令项下方的参数提示：命令里已有 {{占位符}} 时列出识别到的
-// 参数（含内联说明）；否则给出占位符写法说明——否则用户不知道命令可以带参数。
+// 参数与密钥引用（含内联说明）；否则给出占位符写法说明——否则用户不知道
+// 命令可以带参数。
 func (f formTui) paramHint() string {
-	if ps := model.ExtractParams(f.inputs[fieldCommand].Value()); len(ps) > 0 {
-		parts := make([]string, len(ps))
-		for i, p := range ps {
-			if p.Desc != "" {
-				parts[i] = p.Name + "（" + p.Desc + "）"
-			} else {
-				parts[i] = p.Name
-			}
-		}
-		return ui.TagStyle.Render("参数: "+strings.Join(parts, ", ")) +
-			ui.DimStyle.Render("（执行时填写，可 tab 复制历史值）")
-	}
+	ps := model.ExtractParams(f.inputs[fieldCommand].Value())
 	inner := formBoxWidth(f.w) - 4 - fieldLabelW - 2 // 与输入框内容对齐后的可用宽度
-	return ui.DimStyle.Render(ui.Truncate("支持参数: {{名称:说明}} 执行时填 · 例: ssh {{user}}@{{host}}", inner))
+	var params, secrets []string
+	for _, p := range ps {
+		item := p.Name
+		if p.Desc != "" {
+			item += "（" + p.Desc + "）"
+		}
+		if p.Secret {
+			secrets = append(secrets, item)
+		} else {
+			params = append(params, item)
+		}
+	}
+	var lines []string
+	if len(params) > 0 {
+		lines = append(lines, ui.TagStyle.Render("参数: "+strings.Join(params, ", "))+
+			ui.DimStyle.Render("（执行时填写，可 tab 复制历史值）"))
+	}
+	if len(secrets) > 0 {
+		lines = append(lines, ui.TagStyle.Render("密钥: "+strings.Join(secrets, ", "))+
+			ui.DimStyle.Render("（执行时从系统密码管理器读取，不上屏不落盘）"))
+	}
+	if len(lines) > 0 {
+		return strings.Join(lines, "\n")
+	}
+	return ui.DimStyle.Render(ui.Truncate("支持参数: {{名称:说明}} 执行时填 · 密钥: {{user@服务}}/{{pass@服务}} 取系统密码", inner))
 }
 
 // commandHint 命令首词的 PATH 校验提示与建议列表。

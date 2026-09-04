@@ -36,6 +36,12 @@ func (a *Alias) Validate() error {
 	if err := validatePlaceholders(a.Command); err != nil {
 		return err
 	}
+	// 密钥占位符笔误检查：user@/pass@ 后必须有服务名
+	for _, p := range ExtractParams(a.Command) {
+		if p.Name == "user@" || p.Name == "pass@" {
+			return fmt.Errorf("密钥占位符 {{%s}} 缺少服务名，应写作 {{%s服务名}}（如 {{pass@mydb}}）", p.Name, p.Name)
+		}
+	}
 	return nil
 }
 

@@ -2,12 +2,16 @@
 // 逐项输入参数值（预填最近一次的值），实时预览替换后的命令，
 // tab 可循环复制历史参数。
 //
+// 密钥引用（{{user@服务}} / {{pass@服务}}）不出现输入框——值在表单
+// 确认后从系统密码管理器读取，表单中只展示读取来源；预览中的密钥值
+// 一律以 •••••• 脱敏，真实密码不上屏。
+//
 // 表单采用内联渲染（fzf 风格，不进 altscreen）：上一个非 cm 命令的
 // 输出仍然留在终端上方，可对照着复制参数值（鼠标选中复制 → 终端
 // 粘贴键填入输入框）。altscreen 会覆盖整个终端且滚回内容无法读回，
 // 因此只在光标处渲染表单本体。
 //
-//	enter      下一项；最后一项上为确认运行
+//	enter      下一项；最后一项上为确认运行（纯密钥命令无输入项，enter 直接运行）
 //	↑/↓        切换字段（shift+tab 上一项）
 //	tab        循环选择历史记录，把该次的全部参数填入输入框
 //	esc/ctrl+c 取消
@@ -31,11 +35,12 @@ import (
 type Config struct {
 	Alias    string
 	Template string           // 含 {{占位符}} 的原始命令
-	Params   []model.Param    // 参数（按出现顺序，已按名称去重，可带说明）
+	Params   []model.Param    // 参数（按出现顺序，已按名称去重，可带说明/密钥引用）
 	History  []history.Record // 该别名最近记录（新的在前）
 }
 
-// Result 参数表单结果。Confirm=false 表示用户取消。
+// Result 参数表单结果。Confirm=false 表示用户取消。Values 只含手填参数，
+// 密钥引用的值由外层在表单退出后从系统密码管理器读取。
 type Result struct {
 	Values  map[string]string
 	Confirm bool
@@ -63,6 +68,7 @@ const maxHistLines = 5
 type tui struct {
 	cfg     Config
 	inputs  []textinput.Model
+	inputOf map[int]int // 参数下标 → 输入框下标（密钥参数只读展示，无输入框）
 	focus   int
 	histIdx int // 选中的历史记录下标（-1 = 未选中，值为手填）；tab 循环
 	w, h    int
@@ -72,14 +78,19 @@ type tui struct {
 func newTui(cfg Config) tui {
 	labelW := paramLabelW(cfg.Params)
 	iw := inputWidthFor(0, labelW)
-	inputs := make([]textinput.Model, len(cfg.Params))
+	inputs := make([]textinput.Model, 0, len(cfg.Params))
+	inputOf := make(map[int]int, len(cfg.Params))
 	for i := range cfg.Params {
+		if cfg.Params[i].Secret {
+			continue
+		}
 		in := textinput.New()
 		in.Prompt = ""
 		in.Width = iw // 先定宽再赋值，保证按宽度计算滚动窗口
-		inputs[i] = in
+		inputs = append(inputs, in)
+		inputOf[i] = len(inputs) - 1
 	}
-	t := tui{cfg: cfg, inputs: inputs, histIdx: -1}
+	t := tui{cfg: cfg, inputs: inputs, inputOf: inputOf, histIdx: -1}
 	// 预填最近一次的参数值：重复上次执行只需连按 enter
 	if len(cfg.History) > 0 {
 		t.applyHistory(0)
@@ -106,7 +117,7 @@ func (t tui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, nil
 
 	case tea.KeyMsg:
-		if len(t.inputs) == 0 { // 理论上不会出现（无参数不会进入本表单）
+		if len(t.inputs) == 0 { // 纯密钥命令：无输入项，enter 直接运行
 			if msg.Type == tea.KeyEnter {
 				t.result = Result{Values: map[string]string{}, Confirm: true}
 				return t, tea.Quit
@@ -169,28 +180,36 @@ func (t *tui) syncFocus() {
 }
 
 // applyHistory 选中第 i 条历史并把该次的参数值填入对应输入框；
-// 模板变更后历史中缺失的参数保持当前值不动。
+// 模板变更后历史中缺失的参数保持当前值不动（密钥引用无输入框，天然跳过）。
 func (t *tui) applyHistory(i int) {
 	t.histIdx = i
 	for j, p := range t.cfg.Params {
+		idx, ok := t.inputOf[j]
+		if !ok {
+			continue
+		}
 		if v, ok := t.cfg.History[i].Params[p.Name]; ok {
-			t.inputs[j].SetValue(v)
+			t.inputs[idx].SetValue(v)
 		}
 	}
 }
 
 // values 收集当前输入值（去首尾空白，保留内部空格——参数可能是带空格的短语）。
+// 只含手填参数，不含密钥引用。
 func (t *tui) values() map[string]string {
 	v := make(map[string]string, len(t.inputs))
-	for i, p := range t.cfg.Params {
-		v[p.Name] = strings.TrimSpace(t.inputs[i].Value())
+	for j, p := range t.cfg.Params {
+		if idx, ok := t.inputOf[j]; ok {
+			v[p.Name] = strings.TrimSpace(t.inputs[idx].Value())
+		}
 	}
 	return v
 }
 
-// preview 替换参数后的完整命令，随输入实时变化。
+// preview 替换参数后的完整命令，随输入实时变化；密钥值以 •••••• 脱敏——
+// 预览不让真实密码上屏。
 func (t *tui) preview() string {
-	return model.RenderCommand(t.cfg.Template, t.values())
+	return model.RenderCommand(t.cfg.Template, model.MaskedValues(t.cfg.Params, t.values()))
 }
 
 // ---------- 渲染 ----------
@@ -218,6 +237,21 @@ func inputWidthFor(termW, labelW int) int {
 	return boxWidth(termW) - 4 - labelW - 2 - 4
 }
 
+// secretRow 渲染密钥引用行：只读信息，说明读取来源（不提供输入框）。
+func secretRow(p model.Param, labelW, inner int) string {
+	kind, svc, _ := model.ParseSecretName(p.Name)
+	what := "密码"
+	if kind == "user" {
+		what = "账号"
+	}
+	info := "🔑 执行时从系统密码管理器读取 " + svc + " 的" + what
+	if p.Desc != "" {
+		info += " · " + p.Desc
+	}
+	return ui.TagStyle.Render(ui.PadRight(p.Name, labelW)) +
+		ui.DimStyle.Render(ui.Truncate(info, inner-labelW))
+}
+
 func (t tui) View() string {
 	if t.w == 0 {
 		t.w, t.h = 80, 24
@@ -232,11 +266,16 @@ func (t tui) View() string {
 	labelW := paramLabelW(t.cfg.Params)
 	descRows := 0
 	for i, p := range t.cfg.Params {
+		idx, ok := t.inputOf[i]
+		if !ok { // 密钥引用：只读信息行
+			lines = append(lines, secretRow(p, labelW, inner))
+			continue
+		}
 		style := ui.DimStyle
-		if i == t.focus {
+		if idx == t.focus {
 			style = ui.AliasStyle
 		}
-		lines = append(lines, style.Render(ui.PadRight(p.Name, labelW))+"["+t.inputs[i].View()+"]")
+		lines = append(lines, style.Render(ui.PadRight(p.Name, labelW))+"["+t.inputs[idx].View()+"]")
 		if p.Desc != "" { // 参数说明：展示在输入框下方，与输入内容对齐
 			descRows++
 			lines = append(lines, ui.DimStyle.Render(strings.Repeat(" ", labelW+1)+"└ "+ui.Truncate(p.Desc, inner-labelW-3)))
@@ -249,7 +288,7 @@ func (t tui) View() string {
 
 	// 历史区按剩余高度收敛展示条数，避免小终端下溢出
 	help := "enter 下一项/运行 · ↑↓ 切换 · tab 复制历史参数 · esc 取消"
-	if n := t.histCount(inner, help); n > 0 {
+	if n := t.histCount(inner, help, descRows); n > 0 {
 		lines = append(lines, "", ui.DimStyle.Render(fmt.Sprintf("最近执行（tab 填入）:")))
 		for i := 0; i < n; i++ {
 			lines = append(lines, t.histLine(i, inner))
@@ -266,16 +305,10 @@ func (t tui) View() string {
 }
 
 // histCount 计算历史区可展示的条数：受历史总量、单页上限与剩余高度三方约束。
-func (t tui) histCount(inner int, help string) int {
+func (t tui) histCount(inner int, help string, descRows int) int {
 	n := min(len(t.cfg.History), maxHistLines)
 	if n == 0 || t.h <= 0 {
 		return n
-	}
-	descRows := 0
-	for _, p := range t.cfg.Params {
-		if p.Desc != "" {
-			descRows++
-		}
 	}
 	// 无历史区时的行数（含盒 padding 2 行）
 	fixed := 7 + len(t.inputs) + descRows + 4 + lipgloss.Height(ui.Wrap(t.preview(), inner-6)) - 1

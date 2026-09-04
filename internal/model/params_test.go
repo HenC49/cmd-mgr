@@ -20,6 +20,11 @@ func TestExtractParams(t *testing.T) {
 		{"说明可含冒号与空格", "curl {{url:格式: http 或 https}}", []Param{{Name: "url", Desc: "格式: http 或 https"}}},
 		{"说明为空视为无说明", "ping {{host:}}", []Param{{Name: "host"}}},
 		{"同名去重取首个说明", "cp {{f:源文件}} {{f}}.bak", []Param{{Name: "f", Desc: "源文件"}}},
+		{"密钥引用", "mysql -u {{user@mydb}} -p{{pass@mydb}}", []Param{{Name: "user@mydb", Secret: true}, {Name: "pass@mydb", Secret: true}}},
+		{"密钥引用可带说明", "PGPASSWORD={{pass@mydb:数据库密码}} psql", []Param{{Name: "pass@mydb", Desc: "数据库密码", Secret: true}}},
+		{"普通参数名含 @ 不误判", "mail {{addr@example.com}}", []Param{{Name: "addr@example.com"}}},
+		{"密钥服务名去重", "{{pass@db}} {{pass@db}}", []Param{{Name: "pass@db", Secret: true}}},
+		{"user 与 pass 同服务是两个参数", "curl -u {{user@api}}:{{pass@api}}", []Param{{Name: "user@api", Secret: true}, {Name: "pass@api", Secret: true}}},
 	}
 	for _, c := range cases {
 		got := ExtractParams(c.cmd)
@@ -90,5 +95,61 @@ func TestAliasValidateRejectsBadPlaceholder(t *testing.T) {
 	a := &Alias{Alias: "x", Command: "echo {{a}} {{}"}
 	if err := a.Validate(); err == nil {
 		t.Error("含非法占位符的命令应校验失败")
+	}
+}
+
+func TestParseSecretName(t *testing.T) {
+	cases := []struct {
+		name      string
+		kind, svc string
+		ok        bool
+	}{
+		{"pass@mydb", "pass", "mydb", true},
+		{"user@a.b.c", "user", "a.b.c", true},
+		{"host@svc", "", "", false}, // 只有 user/pass 前缀是密钥
+		{"user", "", "", false},     // 无 @
+		{"user@", "", "", false},    // 服务名为空
+		{"x@user@y", "", "", false}, // 前缀必须从名称开头
+	}
+	for _, c := range cases {
+		kind, svc, ok := ParseSecretName(c.name)
+		if ok != c.ok || kind != c.kind || svc != c.svc {
+			t.Errorf("ParseSecretName(%q) = (%q, %q, %v), 期望 (%q, %q, %v)",
+				c.name, kind, svc, ok, c.kind, c.svc, c.ok)
+		}
+	}
+}
+
+func TestMaskedValues(t *testing.T) {
+	params := []Param{{Name: "host"}, {Name: "user@db", Secret: true}, {Name: "pass@db", Secret: true}}
+	values := map[string]string{"host": "10.0.0.1", "user@db": "alice", "pass@db": "s3cret"}
+	got := MaskedValues(params, values)
+	if got["host"] != "10.0.0.1" {
+		t.Errorf("普通参数不应脱敏: %v", got)
+	}
+	for _, k := range []string{"user@db", "pass@db"} {
+		if got[k] != SecretMask {
+			t.Errorf("密钥 %s 应脱敏为 %q, 得到 %q", k, SecretMask, got[k])
+		}
+	}
+	// 值缺失时（执行前预览场景）补脱敏占位
+	got2 := MaskedValues(params, map[string]string{"host": "h"})
+	if got2["pass@db"] != SecretMask {
+		t.Errorf("缺失的密钥值应补脱敏占位: %v", got2)
+	}
+	// 原映射不被修改
+	if values["pass@db"] != "s3cret" {
+		t.Error("MaskedValues 不应改动传入的 values")
+	}
+}
+
+func TestAliasValidateSecretRef(t *testing.T) {
+	ok := &Alias{Alias: "db", Command: "mysql -u {{user@mydb}} -p{{pass@mydb}} -h db.local"}
+	if err := ok.Validate(); err != nil {
+		t.Errorf("合法密钥占位符不应报错: %v", err)
+	}
+	bad := &Alias{Alias: "db", Command: "mysql -p{{pass@}}"}
+	if err := bad.Validate(); err == nil {
+		t.Error("{{pass@}} 缺服务名应报错")
 	}
 }
