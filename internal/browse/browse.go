@@ -24,12 +24,12 @@ type visEntry struct {
 }
 
 type browseTui struct {
-	all   []discover.Entry
-	vis   []visEntry
-	query textinput.Model
+	all            []discover.Entry
+	vis            []visEntry
+	query          textinput.Model
 	cursor, offset int
-	w, h  int
-	chosen *discover.Entry
+	w, h           int
+	chosen         *discover.Entry
 }
 
 // Run 启动浏览 TUI，返回用户选中的命令条目；未选中时第二个返回值为 false。

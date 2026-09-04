@@ -133,3 +133,25 @@ func TestFilterAndKeys(t *testing.T) {
 		t.Error("其他键应取消确认")
 	}
 }
+
+// ctrl+x / ctrl+o 触发导出/导入动作；帮助行展示两个新按键。
+func TestExportImportKeys(t *testing.T) {
+	m := resize(t, newTui(testItems(), nil), 120, 30)
+
+	upd, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	if r := upd.(tui).result; r.Action != ActionExport {
+		t.Errorf("ctrl+x 应触发导出，得到 %v", r.Action)
+	}
+	upd, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	if r := upd.(tui).result; r.Action != ActionImport {
+		t.Errorf("ctrl+o 应触发导入，得到 %v", r.Action)
+	}
+
+	// 帮助行包含两个入口
+	view := m.View()
+	for _, want := range []string{"ctrl+o 导入", "ctrl+x 导出"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("帮助行应包含 %q\n---\n%s", want, view)
+		}
+	}
+}

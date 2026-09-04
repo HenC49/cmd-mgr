@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"cmd-mgr/internal/model"
@@ -152,6 +153,80 @@ func (s *Store) RecordUse(alias string) error {
 	a.UsedCount++
 	a.LastUsedAt = time.Now()
 	return s.Save()
+}
+
+// ExportJSON 序列化整个别名库（与 aliases.json 同构），导出文件既可作
+// 备份直接放回，也可用 cm import 导入。
+func (s *Store) ExportJSON() ([]byte, error) {
+	s.data.Version = dbVersion
+	return json.MarshalIndent(&s.data, "", "  ")
+}
+
+// ImportResult 导入结果分类明细。
+type ImportResult struct {
+	Added   []string // 新增的别名
+	Updated []string // 覆盖更新的别名
+	Skipped []string // 与库中重名被跳过的别名
+	Invalid []string // 校验失败的条目（"别名: 原因"）
+}
+
+// Import 合并导入一批别名：文件内重名后者胜出；与库中重名默认跳过，
+// overwrite 为 true 时覆盖。条目保留导入文件中的全部字段（含创建时间与
+// 使用统计），创建时间为零时补当前时间；非法条目跳过并记入 Invalid。
+// dryRun 为 true 时只计算结果，不改动库也不落盘。
+func (s *Store) Import(list []*model.Alias, overwrite, dryRun bool) (*ImportResult, error) {
+	res := &ImportResult{}
+	uniq := make(map[string]*model.Alias, len(list))
+	order := make([]string, 0, len(list))
+	for _, a := range list {
+		if a == nil {
+			continue
+		}
+		name := strings.TrimSpace(a.Alias)
+		if name == "" {
+			res.Invalid = append(res.Invalid, "<空别名>: 别名不能为空")
+			continue
+		}
+		a.Alias = name
+		if _, seen := uniq[name]; !seen {
+			order = append(order, name)
+		}
+		uniq[name] = a // 文件内重名后者胜出
+	}
+	// 在副本上合并，dry-run 或中途出错都不污染内存中的库
+	pos := make(map[string]int, len(s.data.Aliases)) // 别名 → 在 merged 中的下标
+	merged := make([]*model.Alias, len(s.data.Aliases), len(s.data.Aliases)+len(order))
+	copy(merged, s.data.Aliases)
+	for i, a := range merged {
+		pos[a.Alias] = i
+	}
+	for _, name := range order {
+		a := uniq[name]
+		if err := a.Validate(); err != nil {
+			res.Invalid = append(res.Invalid, name+": "+err.Error())
+			continue
+		}
+		if a.CreatedAt.IsZero() {
+			a.CreatedAt = time.Now()
+		}
+		if i, ok := pos[a.Alias]; ok {
+			if !overwrite {
+				res.Skipped = append(res.Skipped, a.Alias)
+				continue
+			}
+			merged[i] = a
+			res.Updated = append(res.Updated, a.Alias)
+			continue
+		}
+		pos[a.Alias] = len(merged)
+		merged = append(merged, a)
+		res.Added = append(res.Added, a.Alias)
+	}
+	if dryRun {
+		return res, nil
+	}
+	s.data.Aliases = merged
+	return res, s.Save()
 }
 
 // Save 原子写盘：先写同目录临时文件再 rename，避免写一半损坏。

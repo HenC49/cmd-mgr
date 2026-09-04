@@ -8,6 +8,8 @@
 //	ctrl+n         新增（返回 ActionAdd 由外层打开表单）
 //	ctrl+e         编辑选中项
 //	ctrl+d         删除选中项（y 确认）
+//	ctrl+x         导出全部别名（外层打开路径输入表单）
+//	ctrl+o         从文件导入别名（外层打开路径输入表单）
 //	esc / ctrl+c   退出
 package picker
 
@@ -35,6 +37,8 @@ const (
 	ActionAdd                   // 打开新增表单
 	ActionEdit                  // 打开编辑表单
 	ActionDelete                // 删除选中别名
+	ActionExport                // 导出全部别名（外层打开路径输入表单）
+	ActionImport                // 从文件导入别名（外层打开路径输入表单）
 )
 
 // Result picker 的返回结果。
@@ -155,6 +159,12 @@ func (t tui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				t.confirm = true
 			}
 			return t, nil
+		case tea.KeyCtrlX:
+			t.result = Result{Action: ActionExport}
+			return t, tea.Quit
+		case tea.KeyCtrlO:
+			t.result = Result{Action: ActionImport}
+			return t, tea.Quit
 		}
 
 		// 查询为空时支持 vim 风格 j/k 移动
@@ -243,12 +253,12 @@ func (t tui) View() string {
 	divider := ui.DimStyle.Render(strings.Repeat("─", t.w))
 	footer := t.footer()
 
-	mainH := max(1, t.h-5) // title + search + divider + divider + footer
+	mainH := max(1, t.h-6) // title + search + divider*2 + footer 两行
 	var main string
 	switch {
 	case len(t.items) == 0:
 		main = lipgloss.Place(t.w, mainH, lipgloss.Center, lipgloss.Center,
-			ui.DimStyle.Render("还没有别名\n\n按 ctrl+n 添加第一条\n或退出后运行 cm add"))
+			ui.DimStyle.Render("还没有别名\n\n按 ctrl+n 添加第一条\n按 ctrl+o 从文件导入\n或退出后运行 cm add"))
 	case len(t.vis) == 0:
 		main = lipgloss.Place(t.w, mainH, lipgloss.Center, lipgloss.Center,
 			ui.DimStyle.Render(fmt.Sprintf("无匹配 %q 的别名", t.query.Value())))
@@ -282,14 +292,17 @@ func firstLine(s string) string {
 	return s
 }
 
+// footer 两行帮助（动作键多，一行在 80 列下放不下会被截断）。
 func (t tui) footer() string {
 	if t.confirm {
 		if cur := t.current(); cur != nil {
 			return ui.ErrorStyle.Render(fmt.Sprintf("确认删除 %q？y 确认 / 其他键取消", cur.Alias))
 		}
 	}
-	help := "↑/↓ 移动 · 输入即过滤 · enter 执行 · ctrl+n 新增 · ctrl+e 编辑 · ctrl+d 删除 · esc 退出"
-	return ui.DimStyle.Render(ui.Truncate(help, t.w))
+	l1 := "↑/↓ 移动 · 输入即过滤 · enter 执行 · esc 退出"
+	l2 := "ctrl+n 新增 · ctrl+e 编辑 · ctrl+d 删除 · ctrl+o 导入 · ctrl+x 导出"
+	return ui.DimStyle.Render(ui.Truncate(l1, t.w)) + "\n" +
+		ui.DimStyle.Render(ui.Truncate(l2, t.w))
 }
 
 func (t tui) listHeight() int {
@@ -297,7 +310,7 @@ func (t tui) listHeight() int {
 	if h == 0 {
 		h = 24
 	}
-	h = max(1, h-5)
+	h = max(1, h-6)
 	if t.w >= 80 {
 		return h
 	}

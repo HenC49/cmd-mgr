@@ -120,6 +120,14 @@ func runRoot() error {
 				return err
 			}
 			notice("%s", ui.OKStyle.Render("✓ 已删除 "+res.Alias.Alias))
+		case picker.ActionExport:
+			if err := runExportFlow(st, out); err != nil {
+				return err
+			}
+		case picker.ActionImport:
+			if err := runImportFlow(st, out); err != nil {
+				return err
+			}
 		}
 	}
 }

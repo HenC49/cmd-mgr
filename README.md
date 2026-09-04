@@ -20,7 +20,8 @@
                                                │ #deploy  #rsync
                                                │ 使用 12 次 · 3 天前
  ──────────────────────────────────────────────────────────────────────
- ↑/↓ 移动 · 输入即过滤 · enter 执行 · ctrl+n 新增 · ctrl+e 编辑 · ctrl+d 删除 · esc 退出
+ ↑/↓ 移动 · 输入即过滤 · enter 执行 · esc 退出
+ ctrl+n 新增 · ctrl+e 编辑 · ctrl+d 删除 · ctrl+o 导入 · ctrl+x 导出
 ```
 
 ## 功能
@@ -33,6 +34,7 @@
 | 密钥占位符 | 命令中写 `{{user@服务名}}` / `{{pass@服务名}}`（如 `mysql -u {{user@mydb}} -p{{pass@mydb}}`），执行时自动从**系统密码管理器**（macOS 钥匙串 / Linux libsecret）读取，密码不手输、不上屏、不落盘 |
 | 执行历史 | 每次执行记录替换后命令、参数值、退出码与耗时；参数表单**预填上次值**、**tab 一键复制历史参数**，预览面板展示最近执行，`cm history` 查看全部 |
 | 别名持久化 | JSON 存储，原子写盘；按使用频率自动排序，常用命令浮顶 |
+| 别名导入导出 | `cm export [文件]`（缺省 stdout）/ `cm import <文件\|->`：备份、机器迁移、团队共享；重名默认跳过、`--overwrite` 覆盖、`--dry-run` 预览 |
 | 统一命令列出可选项 | `cm`（TUI 双栏：列表 + 命令预览）/ `cm list`（表格）/ `cm search <词>` |
 | 自动列出可用命令 | `cm add` 时实时从 PATH 补全命令名（tab 补全）并校验；`cm browse` TUI 浏览 PATH 全部可执行命令，选中可直接建别名 |
 
@@ -88,6 +90,8 @@ cm list            # 表格列出全部
 cm search docker   # 模糊搜索
 cm run dsync       # 跳过 TUI 直接执行（含参数时同样先填参数）
 cm history         # 查看执行历史（替换后命令 + 结果）；cm history dsync 看单个别名
+cm export > b.json # 导出全部别名（备份/迁移/分享）
+cm import b.json   # 导入别名（重名跳过，--overwrite 覆盖）
 cm edit dsync      # 编辑
 cm rm dsync        # 删除（-f 跳过确认；-i 多选删除）
 cm browse          # 浏览 PATH 中所有可用命令
@@ -151,6 +155,28 @@ cm add -a api  -d "调接口"  -- 'curl -u {{user@api}}:{{pass@api}} https://api
   敏感场景建议用环境变量前置形式（如 `PGPASSWORD={{pass@mydb}} psql ...`）；
   `cm run --print` 会把含真实密码的命令打到 stdout 供 shell eval，不要重定向到文件。
 
+## 别名导入导出（cm export / cm import）
+
+备份、换机迁移、团队共享一套命令库。除命令行外，**主选择器里也有入口**：
+`ctrl+x` 导出（路径预填 `~/cm-aliases-日期.json`）、`ctrl+o` 导入，全程不离开 TUI：
+
+```bash
+cm export > backup.json        # 导出到 stdout（重定向保存）
+cm export team.json            # 或直接写入文件（权限 0600）
+cm import backup.json          # 导入：重名默认跳过，保留本地版本
+cm import --overwrite t.json   # 重名覆盖为文件中的版本
+cm import --dry-run t.json     # 只预览结果，不落盘
+cm export | ssh bob@srv 'cm import -'   # 机器间管道迁移（- 从 stdin 读）
+```
+
+- 导出格式与别名库 `aliases.json` 同构（含标签、创建时间、使用统计），导出文件
+  也可以直接放回存储位置当作备份恢复；执行历史不包含在内；
+- 导入逐条校验（占位符语法、非法字符等），坏条目跳过并逐条报告，不影响其余导入；
+  也接受纯 JSON 数组 `[{"alias":..,"command":..}]`，方便手写或裁剪；
+- 文件内重名取后者；
+- **可以放心分享**：命令里的 `{{pass@服务}}` 只是引用，真实密码在各自的系统
+  密码管理器里，导出文件不含任何密钥。
+
 ## shell 集成（推荐：支持 cd / export / shell 函数）
 
 默认模式下，选中的命令由 cm 起子进程执行。子进程是非交互 shell，**不加载 `~/.zshrc`**，因此用不了 shell 函数和别名（如 SDKMAN! 的 `sdk`、`nvm`），也无法改变当前 shell 的目录和环境变量。
@@ -198,6 +224,8 @@ eval "$(cm init zsh)"
 | `ctrl+n` | 新增别名（保存后回到选择器） |
 | `ctrl+e` | 编辑选中项 |
 | `ctrl+d` | 删除选中项（`y` 确认） |
+| `ctrl+x` | 导出全部别名（输入文件路径，预填 `~/cm-aliases-日期.json`） |
+| `ctrl+o` | 从文件导入别名（输入路径，重名默认跳过；结果框展示明细） |
 | `esc` / `ctrl+c` | 退出 |
 
 参数表单（命令含 `{{占位符}}` 时出现）：
@@ -227,7 +255,7 @@ make release     # 全平台编译并打包 dist/（tar.gz / zip / checksums.txt
 
 ```
 internal/
-├── cmd/        # cobra 子命令：root(picker)/add/list/rm/edit/run/search/browse/history/init
+├── cmd/        # cobra 子命令：root(picker)/add/list/rm/edit/run/search/browse/history/export/import/init
 ├── model/      # Alias 数据模型、校验、{{占位符}} 解析、按使用排序
 ├── store/      # 别名 JSON 持久化（原子写）、CRUD、使用统计
 ├── history/    # 执行历史持久化（替换后命令、参数值、退出码、耗时）
@@ -236,6 +264,7 @@ internal/
 ├── picker/     # 主选择 TUI（即时过滤 + 双栏预览 + 最近执行）
 ├── form/       # 新增/编辑表单 TUI（PATH 补全、参数提示）
 ├── prompt/     # 执行前参数填写 TUI（预填历史值、tab 复制历史参数、密钥脱敏预览）
+├── input/      # 单字段输入/结果展示 TUI（导出导入路径等轻量流程）
 ├── secret/     # 系统密码管理器读写（macOS 钥匙串 / Linux libsecret）
 ├── browse/     # PATH 命令浏览 TUI
 ├── discover/   # $PATH 扫描
